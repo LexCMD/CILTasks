@@ -570,7 +570,8 @@
         </div>
     </div>
     
-    <script type="module">
+   
+<script type="module">
         // Supabase configuration
         const SUPABASE_URL = 'https://fzfeowobpajqvrpaysea.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6ZmVvd29icGFqcXZycGF5c2VhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAyNTM0MTQsImV4cCI6MjA2NTgyOTQxNH0.Aji7obtIm_OgjODTrLidpfzuoE-BjKglQqCoy4o_3GA';
@@ -583,6 +584,12 @@
         
         let tasks = [];
         let currentEditId = null;
+        
+        // Auto-refresh configuration
+        let autoRefreshInterval = null;
+        let lastTaskCount = 0;
+        let isAutoRefreshEnabled = true;
+        const REFRESH_INTERVAL = 10000; // 10 seconds
         
         // Utility functions
         function showLoading(show) {
@@ -608,7 +615,44 @@
             }, 3000);
         }
         
-        // Database functions
+        // Enhanced loadTasks with change detection
+        async function loadTasksWithChangeDetection() {
+            try {
+                const { data, error } = await supabase
+                    .from('Tasks')
+                    .select('*')
+                    .order('created_date', { ascending: false });
+                
+                if (error) throw error;
+                
+                const newData = data || [];
+                
+                // Check if there are changes
+                if (tasks.length > 0) {
+                    const hasChanges = detectChanges(tasks, newData);
+                    if (hasChanges) {
+                        const changeType = getChangeType(tasks, newData);
+                        showSuccess(`Dashboard updated: ${changeType}`);
+                    }
+                }
+                
+                tasks = newData;
+                renderTasks();
+                updateStats();
+                
+                // Maintain current filters
+                applyFilters();
+                
+            } catch (error) {
+                console.error('Error loading tasks:', error);
+                // Don't show error for background updates
+                if (!autoRefreshInterval) {
+                    showError('Failed to load tasks. Please try refreshing the page.');
+                }
+            }
+        }
+        
+        // Database functions - UPDATED loadTasks for initial load
         async function loadTasks() {
             showLoading(true);
             try {
@@ -630,7 +674,8 @@
                 showLoading(false);
             }
         }
-        
+
+        // Enhanced saveTask function that triggers immediate refresh
         async function saveTask(taskData) {
             try {
                 if (currentEditId) {
@@ -652,7 +697,8 @@
                     showSuccess('Task created successfully!');
                 }
                 
-                await loadTasks(); // Reload tasks from database
+                // Immediate refresh after save
+                await loadTasksWithChangeDetection();
                 
             } catch (error) {
                 console.error('Error saving task:', error);
@@ -661,6 +707,7 @@
             }
         }
         
+        // Enhanced deleteTaskFromDB function with immediate refresh
         async function deleteTaskFromDB(id) {
             try {
                 const { error } = await supabase
@@ -671,12 +718,161 @@
                 if (error) throw error;
                 
                 showSuccess('Task deleted successfully!');
-                await loadTasks(); // Reload tasks from database
+                
+                // Immediate refresh after delete
+                await loadTasksWithChangeDetection();
                 
             } catch (error) {
                 console.error('Error deleting task:', error);
                 showError('Failed to delete task. Please try again.');
             }
+        }
+        
+        // Detect if there are changes between old and new data
+        function detectChanges(oldTasks, newTasks) {
+            if (oldTasks.length !== newTasks.length) {
+                return true;
+            }
+            
+            // Check for updates by comparing last modified dates or content
+            for (let i = 0; i < newTasks.length; i++) {
+                const newTask = newTasks[i];
+                const oldTask = oldTasks.find(t => t.id === newTask.id);
+                
+                if (!oldTask) {
+                    return true; // New task
+                }
+                
+                // Compare key fields for changes
+                if (oldTask.title !== newTask.title ||
+                    oldTask.status !== newTask.status ||
+                    oldTask.assigned_to !== newTask.assigned_to ||
+                    oldTask.priority !== newTask.priority) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        // Determine what type of change occurred
+        function getChangeType(oldTasks, newTasks) {
+            if (newTasks.length > oldTasks.length) {
+                return 'New task added';
+            } else if (newTasks.length < oldTasks.length) {
+                return 'Task deleted';
+            } else {
+                return 'Task updated';
+            }
+        }
+        
+        // Start auto-refresh
+        function startAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            autoRefreshInterval = setInterval(() => {
+                if (isAutoRefreshEnabled && !document.hidden) {
+                    console.log('Auto-refreshing dashboard...');
+                    loadTasksWithChangeDetection();
+                }
+            }, REFRESH_INTERVAL);
+            
+            console.log(`✅ Auto-refresh started (every ${REFRESH_INTERVAL/1000} seconds)`);
+        }
+        
+        // Stop auto-refresh
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                console.log('❌ Auto-refresh stopped');
+            }
+        }
+        
+        // Toggle auto-refresh
+        function toggleAutoRefresh() {
+            isAutoRefreshEnabled = !isAutoRefreshEnabled;
+            const button = document.getElementById('autoRefreshToggle');
+            
+            if (isAutoRefreshEnabled) {
+                button.textContent = '🔄 Auto-Refresh: ON';
+                button.style.background = 'linear-gradient(135deg, #27ae60, #2ecc71)';
+                startAutoRefresh();
+            } else {
+                button.textContent = '⏸️ Auto-Refresh: OFF';
+                button.style.background = 'linear-gradient(135deg, #95a5a6, #7f8c8d)';
+                stopAutoRefresh();
+            }
+        }
+        
+        // Manual refresh function
+        async function manualRefresh() {
+            const button = document.getElementById('manualRefreshBtn');
+            const originalText = button.textContent;
+            
+            button.textContent = 'Refreshing...';
+            button.disabled = true;
+            
+            await loadTasksWithChangeDetection();
+            
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.disabled = false;
+            }, 1000);
+        }
+        
+        // Add refresh control buttons to the dashboard
+        function addRefreshControls() {
+            const controls = document.querySelector('.controls');
+            
+            // Create refresh controls container
+            const refreshControls = document.createElement('div');
+            refreshControls.style.display = 'flex';
+            refreshControls.style.gap = '10px';
+            refreshControls.style.alignItems = 'center';
+            
+            // Manual refresh button
+            const manualRefreshBtn = document.createElement('button');
+            manualRefreshBtn.id = 'manualRefreshBtn';
+            manualRefreshBtn.className = 'btn btn-small';
+            manualRefreshBtn.textContent = '🔄 Refresh';
+            manualRefreshBtn.onclick = manualRefresh;
+            
+            // Auto-refresh toggle button
+            const autoRefreshToggle = document.createElement('button');
+            autoRefreshToggle.id = 'autoRefreshToggle';
+            autoRefreshToggle.className = 'btn btn-small';
+            autoRefreshToggle.textContent = '🔄 Auto-Refresh: ON';
+            autoRefreshToggle.style.background = 'linear-gradient(135deg, #27ae60, #2ecc71)';
+            autoRefreshToggle.onclick = toggleAutoRefresh;
+            
+            // Auto-refresh interval display
+            const intervalDisplay = document.createElement('span');
+            intervalDisplay.style.fontSize = '12px';
+            intervalDisplay.style.color = '#7f8c8d';
+            intervalDisplay.textContent = `(every ${REFRESH_INTERVAL/1000}s)`;
+            
+            refreshControls.appendChild(manualRefreshBtn);
+            refreshControls.appendChild(autoRefreshToggle);
+            refreshControls.appendChild(intervalDisplay);
+            
+            // Insert after the "Add New Task" button
+            const addButton = controls.querySelector('.btn-success');
+            addButton.parentNode.insertBefore(refreshControls, addButton.nextSibling);
+        }
+        
+        // Initialize dashboard with auto-refresh
+        function initializeDashboard() {
+            // First load
+            loadTasks();
+            
+            // Start auto-refresh
+            startAutoRefresh();
+            
+            // Add manual refresh and toggle buttons to existing controls
+            addRefreshControls();
         }
         
         // UI functions
@@ -851,6 +1047,24 @@
             renderTasks(filteredTasks);
         }
         
+        // Pause auto-refresh when page is hidden (saves bandwidth)
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                console.log('Page hidden - pausing auto-refresh');
+            } else {
+                console.log('Page visible - resuming auto-refresh');
+                if (isAutoRefreshEnabled) {
+                    // Do an immediate refresh when page becomes visible
+                    loadTasksWithChangeDetection();
+                }
+            }
+        });
+        
+        // Cleanup when page unloads
+        window.addEventListener('beforeunload', function() {
+            stopAutoRefresh();
+        });
+        
         // Form submission handler
         document.getElementById('taskForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -895,10 +1109,12 @@
         window.editTask = editTask;
         window.deleteTask = deleteTask;
         window.markCompleted = markCompleted;
+        window.toggleAutoRefresh = toggleAutoRefresh;
+        window.manualRefresh = manualRefresh;
         
-        // Initialize the dashboard
+        // Initialize the dashboard - UPDATED to use new function
         document.addEventListener('DOMContentLoaded', function() {
-            loadTasks();
+            initializeDashboard();
         });
     </script>
 </body>
