@@ -613,7 +613,7 @@
             showLoading(true);
             try {
                 const { data, error } = await supabase
-                    .from('tasks')
+                    .from('Tasks')
                     .select('*')
                     .order('created_date', { ascending: false });
                 
@@ -636,7 +636,7 @@
                 if (currentEditId) {
                     // Update existing task
                     const { error } = await supabase
-                        .from('tasks')
+                        .from('Tasks')
                         .update(taskData)
                         .eq('id', currentEditId);
                     
@@ -645,7 +645,7 @@
                 } else {
                     // Create new task
                     const { error } = await supabase
-                        .from('tasks')
+                        .from('Tasks')
                         .insert([taskData]);
                     
                     if (error) throw error;
@@ -664,7 +664,7 @@
         async function deleteTaskFromDB(id) {
             try {
                 const { error } = await supabase
-                    .from('tasks')
+                    .from('Tasks')
                     .delete()
                     .eq('id', id);
                 
